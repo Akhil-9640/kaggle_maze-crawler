@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+crash_log.txt
+.system_generated/
+*.log
