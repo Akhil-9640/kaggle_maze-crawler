@@ -45,6 +45,8 @@ Using insights from the branches above, we developed a series of unified agents:
 | **`agent_v5`** | **The Winning Recipe:** Enabled miners, added anti-oscillation, unified build checks. | **50% Win** | **65% Win** | **Selected & Pushed** |
 | **`agent_v6`** | Lowered factory worker energy reserve parameter to 300. | 25% Win | 50% Win | Failed (Degraded) |
 | **`agent_v7`** | Tuned v5 with miner threshold tweaks. | 50% Win | 55% Win | Redundant (Identical to v5) |
+| **`agent_swarm`** | Centralized Swarm Target Assignment. | 50% Win | 35% Win (vs v5) | Abandoned (Regression vs v5) |
+| **`agent_fields`** | Dynamic Influence Fields / Dijkstra Maps. | 50% Win | 40% Win (vs v5) | Abandoned (Regression vs v5) |
 
 ---
 
