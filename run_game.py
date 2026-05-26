@@ -88,4 +88,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 2:
         agent_b = sys.argv[2]
     
-    run_benchmark(agent_a, agent_b, num_rounds=10)
+    rounds = 10
+    if len(sys.argv) > 3:
+        rounds = int(sys.argv[3])
+    
+    run_benchmark(agent_a, agent_b, num_rounds=rounds)

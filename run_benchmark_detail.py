@@ -23,16 +23,16 @@ def get_outcome(final):
 for round_idx in range(10):
     seed = 42 + round_idx
     
-    # Match 1: A=main.py (0), B=starter_bfs.py (1)
+    # Match 1: A=agent_lean.py (0), B=starter_bfs.py (1)
     env = make("crawl", configuration={"randomSeed": seed}, debug=False)
-    env.run(["main.py", "starter_bfs.py"])
+    env.run(["agent_lean.py", "starter_bfs.py"])
     final = env.steps[-1]
     outcome1 = get_outcome(final)
     print(f"Round {round_idx} (Seed {seed}) - Match 1: A (Player 0) vs B (Player 1) - Steps: {len(env.steps)} | {outcome1}")
 
-    # Match 2: B=starter_bfs.py (0), A=main.py (1)
+    # Match 2: B=starter_bfs.py (0), A=agent_lean.py (1)
     env = make("crawl", configuration={"randomSeed": seed}, debug=False)
-    env.run(["starter_bfs.py", "main.py"])
+    env.run(["starter_bfs.py", "agent_lean.py"])
     final = env.steps[-1]
     outcome2 = get_outcome(final)
     print(f"Round {round_idx} (Seed {seed}) - Match 2: B (Player 0) vs A (Player 1) - Steps: {len(env.steps)} | {outcome2}")

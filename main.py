@@ -104,8 +104,8 @@ FACTORY_SACRIFICE_GAP = 1
 WORKER_TARGET_COUNT = 1
 SCOUT_TARGET_COUNT_OPENING = 1
 SCOUT_TARGET_COUNT_MID = 1
-MINER_TARGET_COUNT = 1
-ALLOW_EXTRA_SCOUT = True
+MINER_TARGET_COUNT = 0
+ALLOW_EXTRA_SCOUT = False
 PROFILE = "baseline_route_floor_hybrid"
 MIN_NODE_SCROLL_GAP = 6
 MIN_MINE_LIFETIME_TURNS = 8
@@ -116,10 +116,10 @@ UNLOAD_FRACTION = 0.75
 SCOUT_RETURN_ENERGY = 75
 SCOUT_FORCE_RETURN_ENERGY = 95
 
-FACTORY_WORKER_RESERVE = 0
-FACTORY_SCOUT_RESERVE = 160
-FACTORY_MINER_RESERVE = 180
-FACTORY_GENERAL_RESERVE = 120
+FACTORY_WORKER_RESERVE = 450
+FACTORY_SCOUT_RESERVE = 300
+FACTORY_MINER_RESERVE = 500
+FACTORY_GENERAL_RESERVE = 400
 
 CRYSTAL_VALUE_WEIGHT = 0.60
 CRYSTAL_DIST_PENALTY = 6.0
@@ -145,8 +145,8 @@ WORKER_REFILL_MAX_CRYSTAL_DIST = 8
 WORKER_REFILL_CRYSTAL_BONUS = 120.0
 OPENING_WORKER_BRANCH_EXIT_LIMIT = 1
 JUMP_ON_NORTH_WALL_GAP = 3
-JUMP_ON_NORTH_WALL_AFTER_STEP = 999
-FACTORY_ROUTE_BLOCKS_BUILD = False
+JUMP_ON_NORTH_WALL_AFTER_STEP = 200
+FACTORY_ROUTE_BLOCKS_BUILD = True
 ENABLE_MARGIN_SURPLUS_SCOUT = True
 SCOUT_BUILD_MARGIN_SURPLUS = 12
 ENABLE_FACTORY_WORKER_REFUEL = True
@@ -1260,6 +1260,52 @@ def factory_optimistic_jump_bfs_first_action(
     return None, None
 
 
+def factory_path_blocked_walls(world, factory):
+    if factory is None:
+        return set()
+    target_row = min(world.north, factory.row + FACTORY_BFS_LOOKAHEAD)
+    goals = [(col, target_row) for col in range(world.width)]
+    
+    queue = deque([[factory.pos]])
+    seen = {factory.pos}
+    path = None
+    while queue:
+        curr_path = queue.popleft()
+        curr = curr_path[-1]
+        if curr in goals:
+            path = curr_path
+            break
+        for direction, nxt in world.neighbors(curr, allow_unknown_target=True):
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            queue.append(curr_path + [nxt])
+            
+    if path is None:
+        return set()
+        
+    blocked = set()
+    for i in range(len(path) - 1):
+        c1 = path[i]
+        c2 = path[i+1]
+        dx = c2[0] - c1[0]
+        dy = c2[1] - c1[1]
+        if dx == 1:
+            d = "EAST"
+        elif dx == -1:
+            d = "WEST"
+        elif dy == 1:
+            d = "NORTH"
+        else:
+            d = "SOUTH"
+            
+        if known_edge_blocked(world, c1, d):
+            blocked.add((c1, d))
+            blocked.add((c2, OPPOSITE[d]))
+            
+    return blocked
+
+
 def worker_has_immediate_wall_job(world, robot, allow_default=False):
     if robot.rtype != WORKER:
         return False
@@ -1295,6 +1341,11 @@ def worker_has_immediate_wall_job(world, robot, allow_default=False):
             return True
         for direction in DIR_ORDER:
             if step_pos(robot.pos, direction) in corridor and can_remove(direction):
+                return True
+
+        factory_blocked = factory_path_blocked_walls(world, factory)
+        for direction in DIR_ORDER:
+            if (robot.pos, direction) in factory_blocked and can_remove(direction):
                 return True
 
     return allow_default and can_remove("NORTH")
@@ -1473,7 +1524,15 @@ def select_candidate_targets(world, robot, reserved_targets):
 
     if robot.rtype == WORKER and world.factory is not None:
         f = world.factory
-        if factory_gap <= danger + WORKER_VANGUARD_GAP:
+        factory_blocked = factory_path_blocked_walls(world, f)
+        if factory_blocked:
+            cells = sorted({item[0] for item in factory_blocked}, key=lambda p: manhattan(f.pos, p))
+            vanguard = cells[0]
+            if vanguard not in reserved_targets and world.in_bounds(vanguard):
+                dist = max(1, manhattan(pos, vanguard))
+                score = WORKER_VANGUARD_SCORE - 4.0 * dist + 0.4 * (vanguard[1] - pos[1])
+                targets.append(Target("worker_vanguard", vanguard, score))
+        elif factory_gap <= danger + WORKER_VANGUARD_GAP:
             vanguard = (f.col, min(world.north, f.row + WORKER_VANGUARD_AHEAD))
             if vanguard not in reserved_targets and world.in_bounds(vanguard):
                 dist = max(1, manhattan(pos, vanguard))
@@ -1982,6 +2041,17 @@ class Strategy:
             )
         )
 
+    def should_throttle(self, robot, emergency):
+        if emergency:
+            return False
+        if self.world.step >= 250:
+            return False
+        gap = robot.row - self.world.south
+        danger = self.dynamic_danger_gap()
+        if gap <= danger + 2:
+            return False
+        return True
+
     def factory_floor_candidate(self, robot, wall, route_quality, emergency):
         emergency_jump = self.try_emergency_jump_north(robot)
         if emergency_jump is not None:
@@ -2004,6 +2074,8 @@ class Strategy:
 
         if route_quality.exists:
             if action_ready(robot.move_cd):
+                if self.should_throttle(robot, emergency):
+                    return "IDLE", robot.pos
                 return route_quality.action, route_quality.next_pos
             return "IDLE", robot.pos
 
@@ -2025,6 +2097,8 @@ class Strategy:
     def factory_complete_candidate(self, robot, wall, route_quality, emergency):
         if route_quality.exists:
             if action_ready(robot.move_cd):
+                if self.should_throttle(robot, emergency):
+                    return "IDLE", robot.pos
                 return route_quality.action, route_quality.next_pos
 
             refuel = self.factory_refuel_worker(robot, route_quality, floor_mode=False)
@@ -2406,7 +2480,7 @@ class Strategy:
         miner_cost = int(cfg(self.world.config, "minerCost", 300))
 
         if self.opening_needs_worker(robot, wall):
-            build = self.factory_build(robot, wall)
+            build = self.factory_worker_build(robot, wall)
             if build is not None:
                 return build
 
@@ -2414,7 +2488,7 @@ class Strategy:
         if scout is not None:
             return scout
 
-        build = self.factory_build(robot, wall)
+        build = self.factory_worker_build(robot, wall)
         if build is not None:
             return build
 
@@ -2482,7 +2556,15 @@ class Strategy:
         return "BUILD_SCOUT", robot.pos
 
     def opening_needs_worker(self, robot, wall):
-        if self.counts.get(WORKER, 0) >= WORKER_TARGET_COUNT:
+        stuck_and_cannot_jump = (
+            not self.factory_route_quality(robot, emergency=False, apply=False).exists
+            and robot.jump_cd > 1
+        )
+        needs_worker = self.world.step > 30 or stuck_and_cannot_jump
+        if not needs_worker:
+            return False
+
+        if self.counts.get(WORKER, 0) >= 1:
             return False
         if wall is not None and (wall & WALL_N):
             return True
@@ -2887,10 +2969,10 @@ class Strategy:
                     self.remember_target(robot, target)
                     return direction, nxt
 
-            if target.kind in {"wall_open", "factory_corridor_open"} and robot.rtype == WORKER:
+            if target.kind in {"wall_open", "factory_corridor_open", "worker_vanguard"} and robot.rtype == WORKER:
                 remove = self.worker_remove_relevant_wall(
                     robot,
-                    allow_default=(target.kind == "wall_open"),
+                    allow_default=(target.kind in {"wall_open", "worker_vanguard"}),
                 )
                 if remove is not None:
                     self.remember_target(robot, target)
@@ -3120,6 +3202,11 @@ class Strategy:
                 return "REMOVE_NORTH", robot.pos
             for direction in DIR_ORDER:
                 if step_pos(robot.pos, direction) in corridor and can_remove(direction):
+                    return "REMOVE_" + direction, robot.pos
+
+            factory_blocked = factory_path_blocked_walls(self.world, factory)
+            for direction in DIR_ORDER:
+                if (robot.pos, direction) in factory_blocked and can_remove(direction):
                     return "REMOVE_" + direction, robot.pos
 
         if allow_default and can_remove("NORTH"):
